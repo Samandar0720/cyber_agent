@@ -1,0 +1,159 @@
+import os
+import sys
+import asyncio
+import logging
+from datetime import datetime
+from dotenv import load_dotenv
+
+# Groq va Gemini API bilan ishlashda kesh va moslik xatoliklarini oldini olish uchun
+import litellm
+litellm.drop_params = True
+
+from crewai import Agent, Task, Crew, Process, LLM
+from crewai_tools import SerperDevTool
+from aiogram import Bot
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# Logging sozlamalari
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+# .env faylidan o'zgaruvchilarni yuklash
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+SERPER_API_KEY = os.getenv("SERPER_API_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
+MY_CHAT_ID = os.getenv("MY_CHAT_ID")
+
+# Tizim o'zgaruvchilarini tekshirish
+if not TELEGRAM_BOT_TOKEN:
+    logging.error("❌ TELEGRAM_BOT_TOKEN aniqlanmadi! .env faylini tekshiring.")
+
+# LLM Obyektini Avtomatik Tanlash (Groq yoki Gemini)
+if GROQ_API_KEY and GROQ_API_KEY != "gsk_your_groq_api_key_here":
+    logging.info("🧠 AI LLM Provayderi: Groq (llama-3.3-70b-versatile)")
+    os.environ["GROQ_API_KEY"] = GROQ_API_KEY
+    llm = LLM(
+        model="groq/llama-3.3-70b-versatile",
+        api_key=GROQ_API_KEY,
+        temperature=0.3,
+        cache=False
+    )
+elif GEMINI_API_KEY:
+    logging.info("🧠 AI LLM Provayderi: Google Gemini (gemini-2.0-flash)")
+    os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
+    llm = LLM(
+        model="gemini/gemini-2.0-flash",
+        api_key=GEMINI_API_KEY,
+        temperature=0.3,
+        cache=False
+    )
+else:
+    logging.warning("⚠️ Diqqat: GROQ_API_KEY yoki GEMINI_API_KEY ko'rsatilmadi!")
+    llm = None
+
+# Qidiruv Vositasi (SerperDevTool)
+if SERPER_API_KEY and SERPER_API_KEY != "your_serper_api_key_here":
+    os.environ["SERPER_API_KEY"] = SERPER_API_KEY
+
+search_tool = SerperDevTool()
+
+# Agent Yaratish: Kiberxavfsizlik va Axborot Texnologiyalari Bosh Tahlilchisi
+cyber_agent = Agent(
+    role="Kiberxavfsizlik va Axborot Texnologiyalari Bosh Tahlilchisi",
+    goal="Bugungi kiberxavfsizlik, zaifliklar (vulnerabilities), kiberhujumlar va IT-xavfsizlik yangiliklarini topish va tahlil qilish.",
+    backstory=(
+        "Siz har kuni The Hacker News, BleepingComputer, SecurityWeek kabi dunyoning yetakchi kiberxavfsizlik "
+        "manbalarini kuzatib boruvchi, murakkab texnik xabarlarni oddiy va tushunarli o'zbek tiliga o'gira oladigan "
+        "tajribali SMM tahlilchisi va kiberxavfsizlik ekspertisiz."
+    ),
+    tools=[search_tool],
+    llm=llm,
+    verbose=True,
+    memory=False
+)
+
+# Task Prompt Yaratish
+cyber_task = Task(
+    description=(
+        "Google va nufuzli manbalar (The Hacker News, BleepingComputer, SecurityWeek) orqali "
+        "bugungi eng muhim va dolzarb 3 ta kiberxavfsizlik yangiligini toping va tahlil qiling.\n\n"
+        "TALABLAR VA QOIDALAR:\n"
+        "1. Barcha matn va xulosalar FAQAT va FAQAT O'ZBEK TILIDA bo'lishi shart.\n"
+        "2. Har bir yangilik strictly quyidagi aniq strukturada bo'lsin:\n\n"
+        "📌 [Mavzu nomi / Sarlavha]\n"
+        "• MOHIYATI: [Nima bo'lgani va kim/qaysi tizim xavf ostida ekani - 2-3 gap]\n"
+        "• XAVF DARAJASI: [Kritik / Yuqori / O'rta va sababi]\n"
+        "• TAVSIYA: [Foydalanuvchi yoki administrator nima qilishi kerakligi haqida 1 ta maslahat]\n"
+        "🔗 MANBA: [Original maqola havolasi (URL)]\n\n"
+        "3. Telegram uchun moslashtirilgan emojilardan foydalanilsin.\n"
+        "4. Har bir yangilik orasiga '-----------------------------------' ajratuvchisini qo'ying.\n"
+        "5. Kirish, salomlashish yoki chiqish matnlari yozilmasin. Faqat yangiliklar posti berilsin."
+    ),
+    expected_output="3 ta eng muhim kiberxavfsizlik yangiligi belgilangan struktura va O'zbek tilidagi Telegram posti ko'rinishida.",
+    agent=cyber_agent
+)
+
+# Crew Yaratish
+crew = Crew(
+    agents=[cyber_agent],
+    tasks=[cyber_task],
+    process=Process.sequential,
+    verbose=True,
+    cache=False,
+    memory=False
+)
+
+async def send_cyber_news():
+    """CrewAI taskini ishga tushiradi va natijani Telegram'ga yuboradi."""
+    logging.info("🚀 [START] Kiberxavfsizlik yangiliklarini yig'ish va tahlil qilish boshlandi...")
+    try:
+        if not TELEGRAM_BOT_TOKEN:
+            logging.error("❌ TELEGRAM_BOT_TOKEN topilmadi! .env faylini tekshiring.")
+            return
+
+        target_chat_id = MY_CHAT_ID
+        if not target_chat_id:
+            logging.warning("⚠️ MY_CHAT_ID belgilanmagan. .env fayliga MY_CHAT_ID va serper_api_key qo'shing.")
+            return
+
+        # CrewAI kickoff funksiyasini asinxron ishga tushirish
+        result = await asyncio.to_thread(crew.kickoff)
+        report_text = str(result)
+
+        bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
+        # Telegram xabari hajmi (max 4096 belgi) oshib ketsa bo'lib yuborish
+        if len(report_text) > 4000:
+            chunks = [report_text[i:i+4000] for i in range(0, len(report_text), 4000)]
+            for chunk in chunks:
+                await bot.send_message(chat_id=target_chat_id, text=chunk, disable_web_page_preview=False)
+        else:
+            await bot.send_message(chat_id=target_chat_id, text=report_text, disable_web_page_preview=False)
+
+        await bot.session.close()
+        logging.info("✅ [SUCCESS] Kiber-yangiliklar Telegram'ga muvaffaqiyatli yuborildi!")
+    except Exception as e:
+        logging.error(f"❌ [ERROR] Yangiliklarni yuborishda xatolik yuz berdi: {e}", exc_info=True)
+
+async def main():
+    # 1. Kod ishga tushganda darhol 1 marta yangilik yuborish
+    logging.info("⚡ Bot ishga tushdi. Birinchi martalik yangilik yuborish jarayoni boshlandi...")
+    await send_cyber_news()
+
+    # 2. Har kuni ertalab soat 08:00 da avtomatik ishga tushish rejimi (AsyncIOScheduler)
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(send_cyber_news, 'cron', hour=8, minute=0)
+    scheduler.start()
+    logging.info("⏰ APScheduler ishga tushdi. Har kuni ertalab soat 08:00 da avtomatik yangiliklar yuboriladi.")
+
+    # Fonda doimiy 24/7 ishlash rejimi
+    while True:
+        await asyncio.sleep(3600)
+
+if __name__ == "__main__":
+    asyncio.run(main())

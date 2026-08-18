@@ -50,7 +50,8 @@ if GROQ_API_KEY and GROQ_API_KEY != "gsk_your_groq_api_key_here":
     llm = LLM(
         model="groq/openai/gpt-oss-120b",
         api_key=GROQ_API_KEY,
-        temperature=0.3
+        temperature=0.3,
+        max_tokens=1200
     )
 elif GEMINI_API_KEY:
     logging.info("🧠 AI LLM Provayderi: Google Gemini (gemini-2.0-flash)")
@@ -89,20 +90,21 @@ cyber_agent = Agent(
 cyber_task = Task(
     description=(
         "Google va nufuzli manbalar (The Hacker News, BleepingComputer, SecurityWeek) orqali "
-        "bugungi eng muhim va dolzarb 3 ta kiberxavfsizlik yangiligini toping va tahlil qiling.\n\n"
+        "bugungi eng muhim va dolzarb 2 ta kiberxavfsizlik yangiligini toping va tahlil qiling.\n\n"
         "TALABLAR VA QOIDALAR:\n"
         "1. Barcha matn va xulosalar FAQAT va FAQAT O'ZBEK TILIDA bo'lishi shart.\n"
-        "2. Har bir yangilik strictly quyidagi aniq strukturada bo'lsin:\n\n"
+        "2. Har bir yangilik strictly quyidagi QISQA strukturada bo'lsin:\n\n"
         "📌 [Mavzu nomi / Sarlavha]\n"
-        "• MOHIYATI: [Nima bo'lgani va kim/qaysi tizim xavf ostida ekani - 2-3 gap]\n"
-        "• XAVF DARAJASI: [Kritik / Yuqori / O'rta va sababi]\n"
-        "• TAVSIYA: [Foydalanuvchi yoki administrator nima qilishi kerakligi haqida 1 ta maslahat]\n"
+        "• MOHIYATI: [Nima bo'lgani va kim/qaysi tizim xavf ostida ekani - FAQAT 1 gap]\n"
+        "• XAVF DARAJASI: [Kritik / Yuqori / O'rta]\n"
+        "• TAVSIYA: [1 ta qisqa maslahat]\n"
         "🔗 MANBA: [Original maqola havolasi (URL)]\n\n"
         "3. Telegram uchun moslashtirilgan emojilardan foydalanilsin.\n"
         "4. Har bir yangilik orasiga '-----------------------------------' ajratuvchisini qo'ying.\n"
-        "5. Kirish, salomlashish yoki chiqish matnlari yozilmasin. Faqat yangiliklar posti berilsin."
+        "5. Kirish, salomlashish yoki chiqish matnlari yozilmasin. Faqat yangiliklar posti berilsin.\n"
+        "6. Umumiy javob juda qisqa va lo'nda bo'lsin, ortiqcha tafsilotlarga bormang."
     ),
-    expected_output="3 ta eng muhim kiberxavfsizlik yangiligi belgilangan struktura va O'zbek tilidagi Telegram posti ko'rinishida.",
+    expected_output="2 ta eng muhim kiberxavfsizlik yangiligi belgilangan qisqa struktura va O'zbek tilidagi Telegram posti ko'rinishida.",
     agent=cyber_agent
 )
 
@@ -188,3 +190,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    

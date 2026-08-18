@@ -2,6 +2,8 @@ import os
 import sys
 import asyncio
 import logging
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -40,8 +42,7 @@ if GROQ_API_KEY and GROQ_API_KEY != "gsk_your_groq_api_key_here":
     llm = LLM(
         model="groq/llama-3.3-70b-versatile",
         api_key=GROQ_API_KEY,
-        temperature=0.3,
-        cache=False
+        temperature=0.3
     )
 elif GEMINI_API_KEY:
     logging.info("🧠 AI LLM Provayderi: Google Gemini (gemini-2.0-flash)")
@@ -49,8 +50,7 @@ elif GEMINI_API_KEY:
     llm = LLM(
         model="gemini/gemini-2.0-flash",
         api_key=GEMINI_API_KEY,
-        temperature=0.3,
-        cache=False
+        temperature=0.3
     )
 else:
     logging.warning("⚠️ Diqqat: GROQ_API_KEY yoki GEMINI_API_KEY ko'rsatilmadi!")
@@ -104,9 +104,29 @@ crew = Crew(
     tasks=[cyber_task],
     process=Process.sequential,
     verbose=True,
-    cache=False,
     memory=False
 )
+
+
+def run_health_server():
+    """Render 'web service' portini tekshirishi uchun minimal HTTP server.
+    Bot ishlashi buning bilan bog'liq emas — bu faqat Render'ning
+    port-scan talabini qondirish uchun ishga tushiriladi."""
+    port = int(os.environ.get("PORT", 10000))
+
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"cyber-agent bot ishlab turibdi")
+
+        def log_message(self, format, *args):
+            pass  # HTTP so'rov loglarini o'chirish
+
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    logging.info(f"🌐 Health-check server {port}-portda ishga tushdi.")
+    server.serve_forever()
 
 async def send_cyber_news():
     """CrewAI taskini ishga tushiradi va natijani Telegram'ga yuboradi."""
@@ -141,6 +161,9 @@ async def send_cyber_news():
         logging.error(f"❌ [ERROR] Yangiliklarni yuborishda xatolik yuz berdi: {e}", exc_info=True)
 
 async def main():
+    # 0. Render port-scan talabini qondirish uchun health-check serverni fon oqimida ishga tushirish
+    threading.Thread(target=run_health_server, daemon=True).start()
+
     # 1. Kod ishga tushganda darhol 1 marta yangilik yuborish
     logging.info("⚡ Bot ishga tushdi. Birinchi martalik yangilik yuborish jarayoni boshlandi...")
     await send_cyber_news()

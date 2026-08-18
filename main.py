@@ -51,7 +51,8 @@ if GROQ_API_KEY and GROQ_API_KEY != "gsk_your_groq_api_key_here":
         model="groq/openai/gpt-oss-120b",
         api_key=GROQ_API_KEY,
         temperature=0.3,
-        max_tokens=1200
+        max_tokens=1200,
+        num_retries=5
     )
 elif GEMINI_API_KEY:
     logging.info("🧠 AI LLM Provayderi: Google Gemini (gemini-2.0-flash)")
@@ -190,4 +191,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    

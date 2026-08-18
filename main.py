@@ -11,6 +11,14 @@ from dotenv import load_dotenv
 import litellm
 litellm.drop_params = True
 
+# CrewAI'ning ma'lum bug'i uchun vaqtinchalik yechim (GitHub Issue #5886):
+# CrewAI 1.14.4+ versiyalarida xabarlarga 'cache_breakpoint' maydoni qo'shiladi,
+# lekin bu faqat Anthropic uchun olib tashlanadi — Groq kabi boshqa provayderlar
+# buni qo'llab-quvvatlamaydi va BadRequestError beradi. Shu sababli bu maydonni
+# hech qachon qo'shmaslikni majburlaymiz.
+import crewai.llms.cache as _crewai_cache
+_crewai_cache.mark_cache_breakpoint = lambda msg: msg
+
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai_tools import SerperDevTool
 from aiogram import Bot

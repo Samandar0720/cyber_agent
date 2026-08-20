@@ -45,10 +45,10 @@ if not TELEGRAM_BOT_TOKEN:
 
 # LLM Obyektini Avtomatik Tanlash (Groq yoki Gemini)
 if GROQ_API_KEY and GROQ_API_KEY != "gsk_your_groq_api_key_here":
-    logging.info("🧠 AI LLM Provayderi: Groq (openai/gpt-oss-120b)")
+    logging.info("🧠 AI LLM Provayderi: Groq (meta-llama/llama-4-scout-17b-16e-instruct)")
     os.environ["GROQ_API_KEY"] = GROQ_API_KEY
     llm = LLM(
-        model="groq/openai/gpt-oss-120b",
+        model="groq/meta-llama/llama-4-scout-17b-16e-instruct",
         api_key=GROQ_API_KEY,
         temperature=0.3,
         max_tokens=1200,

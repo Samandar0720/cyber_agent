@@ -3,6 +3,7 @@ import sys
 import asyncio
 import logging
 import threading
+import requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
 from dotenv import load_dotenv
@@ -11,16 +12,6 @@ from dotenv import load_dotenv
 import litellm
 litellm.drop_params = True
 
-# CrewAI'ning ma'lum bug'i uchun vaqtinchalik yechim (GitHub Issue #5886):
-# CrewAI 1.14.4+ versiyalarida xabarlarga 'cache_breakpoint' maydoni qo'shiladi,
-# lekin bu faqat Anthropic uchun olib tashlanadi — Groq kabi boshqa provayderlar
-# buni qo'llab-quvvatlamaydi va BadRequestError beradi. Shu sababli bu maydonni
-# hech qachon qo'shmaslikni majburlaymiz.
-import crewai.llms.cache as _crewai_cache
-_crewai_cache.mark_cache_breakpoint = lambda msg: msg
-
-from crewai import Agent, Task, Crew, Process, LLM
-from crewai_tools import SerperDevTool
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -43,80 +34,45 @@ MY_CHAT_ID = os.getenv("MY_CHAT_ID")
 if not TELEGRAM_BOT_TOKEN:
     logging.error("❌ TELEGRAM_BOT_TOKEN aniqlanmadi! .env faylini tekshiring.")
 
-# LLM Obyektini Avtomatik Tanlash (Groq yoki Gemini)
+# LLM model nomini tanlash (Groq yoki Gemini)
 if GROQ_API_KEY and GROQ_API_KEY != "gsk_your_groq_api_key_here":
     logging.info("🧠 AI LLM Provayderi: Groq (openai/gpt-oss-20b)")
     os.environ["GROQ_API_KEY"] = GROQ_API_KEY
-    llm = LLM(
-        model="groq/openai/gpt-oss-20b",
-        api_key=GROQ_API_KEY,
-        temperature=0.3,
-        max_tokens=1200,
-        num_retries=5
-    )
+    LLM_MODEL = "groq/openai/gpt-oss-20b"
 elif GEMINI_API_KEY:
     logging.info("🧠 AI LLM Provayderi: Google Gemini (gemini-2.0-flash)")
     os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
-    llm = LLM(
-        model="gemini/gemini-2.0-flash",
-        api_key=GEMINI_API_KEY,
-        temperature=0.3
-    )
+    LLM_MODEL = "gemini/gemini-2.0-flash"
 else:
     logging.warning("⚠️ Diqqat: GROQ_API_KEY yoki GEMINI_API_KEY ko'rsatilmadi!")
-    llm = None
+    LLM_MODEL = None
 
-# Qidiruv Vositasi (SerperDevTool)
 if SERPER_API_KEY and SERPER_API_KEY != "your_serper_api_key_here":
     os.environ["SERPER_API_KEY"] = SERPER_API_KEY
 
-search_tool = SerperDevTool()
 
-# Agent Yaratish: Kiberxavfsizlik va Axborot Texnologiyalari Bosh Tahlilchisi
-cyber_agent = Agent(
-    role="Kiberxavfsizlik va Axborot Texnologiyalari Bosh Tahlilchisi",
-    goal="Bugungi kiberxavfsizlik, zaifliklar (vulnerabilities), kiberhujumlar va IT-xavfsizlik yangiliklarini topish va tahlil qilish.",
-    backstory=(
-        "Siz har kuni The Hacker News, BleepingComputer, SecurityWeek kabi dunyoning yetakchi kiberxavfsizlik "
-        "manbalarini kuzatib boruvchi, murakkab texnik xabarlarni oddiy va tushunarli o'zbek tiliga o'gira oladigan "
-        "tajribali SMM tahlilchisi va kiberxavfsizlik ekspertisiz."
-    ),
-    tools=[search_tool],
-    llm=llm,
-    verbose=True,
-    memory=False
-)
+def search_cyber_news():
+    """Serper API orqali to'g'ridan-to'g'ri (LLM agent tool-loopisiz) qidiruv qilish.
+    Bu CrewAI Agent'ning ichki 2 martalik LLM chaqiruvini (fikrlash + yakuniy javob)
+    1 tagacha kamaytiradi, natijada Groq bepul tarifidagi TPM (daqiqalik token)
+    limitidan chiqib ketmaydi."""
+    url = "https://google.serper.dev/search"
+    headers = {"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"}
+    payload = {"q": "cybersecurity vulnerability breach news today", "num": 8}
+    resp = requests.post(url, headers=headers, json=payload, timeout=20)
+    resp.raise_for_status()
+    data = resp.json()
 
-# Task Prompt Yaratish
-cyber_task = Task(
-    description=(
-        "Google va nufuzli manbalar (The Hacker News, BleepingComputer, SecurityWeek) orqali "
-        "bugungi eng muhim va dolzarb 2 ta kiberxavfsizlik yangiligini toping va tahlil qiling.\n\n"
-        "TALABLAR VA QOIDALAR:\n"
-        "1. Barcha matn va xulosalar FAQAT va FAQAT O'ZBEK TILIDA bo'lishi shart.\n"
-        "2. Har bir yangilik strictly quyidagi QISQA strukturada bo'lsin:\n\n"
-        "📌 [Mavzu nomi / Sarlavha]\n"
-        "• MOHIYATI: [Nima bo'lgani va kim/qaysi tizim xavf ostida ekani - FAQAT 1 gap]\n"
-        "• XAVF DARAJASI: [Kritik / Yuqori / O'rta]\n"
-        "• TAVSIYA: [1 ta qisqa maslahat]\n"
-        "🔗 MANBA: [Original maqola havolasi (URL)]\n\n"
-        "3. Telegram uchun moslashtirilgan emojilardan foydalanilsin.\n"
-        "4. Har bir yangilik orasiga '-----------------------------------' ajratuvchisini qo'ying.\n"
-        "5. Kirish, salomlashish yoki chiqish matnlari yozilmasin. Faqat yangiliklar posti berilsin.\n"
-        "6. Umumiy javob juda qisqa va lo'nda bo'lsin, ortiqcha tafsilotlarga bormang."
-    ),
-    expected_output="2 ta eng muhim kiberxavfsizlik yangiligi belgilangan qisqa struktura va O'zbek tilidagi Telegram posti ko'rinishida.",
-    agent=cyber_agent
-)
-
-# Crew Yaratish
-crew = Crew(
-    agents=[cyber_agent],
-    tasks=[cyber_task],
-    process=Process.sequential,
-    verbose=True,
-    memory=False
-)
+    results = []
+    for item in data.get("news", []) or data.get("organic", []):
+        title = item.get("title", "")
+        snippet = item.get("snippet", "")
+        link = item.get("link", "")
+        if title and link:
+            results.append(f"- SARLAVHA: {title}\n  QISQACHA: {snippet}\n  HAVOLA: {link}")
+        if len(results) >= 6:
+            break
+    return "\n".join(results)
 
 
 def run_health_server():
@@ -140,7 +96,8 @@ def run_health_server():
     server.serve_forever()
 
 async def send_cyber_news():
-    """CrewAI taskini ishga tushiradi va natijani Telegram'ga yuboradi."""
+    """Serper orqali yangiliklarni qidiradi va bitta LLM chaqiruvi bilan
+    Telegram posti shakliga keltirib yuboradi."""
     logging.info("🚀 [START] Kiberxavfsizlik yangiliklarini yig'ish va tahlil qilish boshlandi...")
     try:
         if not TELEGRAM_BOT_TOKEN:
@@ -152,9 +109,43 @@ async def send_cyber_news():
             logging.warning("⚠️ MY_CHAT_ID belgilanmagan. .env fayliga MY_CHAT_ID va serper_api_key qo'shing.")
             return
 
-        # CrewAI kickoff funksiyasini asinxron ishga tushirish
-        result = await asyncio.to_thread(crew.kickoff)
-        report_text = str(result)
+        if not LLM_MODEL:
+            logging.error("❌ LLM modeli sozlanmagan (GROQ_API_KEY yoki GEMINI_API_KEY yo'q).")
+            return
+
+        # 1. Qidiruv (LLM chaqiruvisiz, oddiy HTTP so'rov)
+        news_raw = await asyncio.to_thread(search_cyber_news)
+        if not news_raw:
+            logging.warning("⚠️ Serper qidiruvi natija bermadi.")
+            return
+
+        # 2. Yakuniy Telegram postini tuzish uchun BITTA marta LLM'ga murojaat
+        prompt = (
+            "Quyida bugungi kiberxavfsizlik yangiliklari haqida xom qidiruv natijalari berilgan.\n\n"
+            f"{news_raw}\n\n"
+            "Shulardan eng muhim va dolzarb 2 tasini tanlab, quyidagi qat'iy talablarga rioya qilgan holda "
+            "Telegram posti tayyorla:\n"
+            "1. Barcha matn FAQAT O'ZBEK TILIDA bo'lsin.\n"
+            "2. Har bir yangilik aynan quyidagi qisqa strukturada bo'lsin:\n\n"
+            "📌 [Mavzu nomi]\n"
+            "• MOHIYATI: [1 gap]\n"
+            "• XAVF DARAJASI: [Kritik / Yuqori / O'rta]\n"
+            "• TAVSIYA: [1 ta qisqa maslahat]\n"
+            "🔗 MANBA: [asl HAVOLA]\n\n"
+            "3. Telegram uchun mos emojilardan foydalan.\n"
+            "4. Har bir yangilik orasiga '-----------------------------------' qo'y.\n"
+            "5. Kirish, salomlashish yoki xulosa matni yozma — faqat yangiliklar posti."
+        )
+
+        response = await asyncio.to_thread(
+            litellm.completion,
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=1200,
+            num_retries=3,
+        )
+        report_text = response["choices"][0]["message"]["content"].strip()
 
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
